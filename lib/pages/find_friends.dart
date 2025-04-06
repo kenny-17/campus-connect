@@ -1,31 +1,7 @@
-// import 'package:flutter/material.dart';
-// import 'package:permission_handler/permission_handler.dart';
-// class FindFriendsPage extends StatelessWidget {
-//   const FindFriendsPage({super.key});
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(
-//         title: const Text('Find Friends'),
-//         backgroundColor: const Color(0xFF059862),
-//       ),
-//       body: const Center(
-//         child: Text(
-//           'This is where you’ll implement finding friends nearby!',
-//           style: TextStyle(fontSize: 18),
-//           textAlign: TextAlign.center,
-//         ),
-//       ),
-//     );
-//   }
-// }
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-
-
-
 
 class FindFriendsPage extends StatefulWidget {
   const FindFriendsPage({super.key});
@@ -35,10 +11,21 @@ class FindFriendsPage extends StatefulWidget {
 }
 
 class _FindFriendsPageState extends State<FindFriendsPage> {
+  final Map<String, ScanResult> _devices = {};
+  late StreamSubscription<List<ScanResult>> _scanSubscription;
+  bool _isScanning = false;
+
   @override
   void initState() {
     super.initState();
     _askPermissionsAndStartBluetooth();
+  }
+
+  @override
+  void dispose() {
+    _scanSubscription.cancel();
+    FlutterBluePlus.stopScan();
+    super.dispose();
   }
 
   Future<void> _askPermissionsAndStartBluetooth() async {
@@ -53,14 +40,31 @@ class _FindFriendsPageState extends State<FindFriendsPage> {
     }
   }
 
-  void _checkBluetoothStatus() async {
+  Future<void> _checkBluetoothStatus() async {
     FlutterBluePlus.adapterState.listen((state) {
       if (state != BluetoothAdapterState.on) {
         _showBluetoothOffDialog();
       }
     });
 
-    FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
+    await _startDeviceScan();
+  }
+
+  Future<void> _startDeviceScan() async {
+    setState(() => _isScanning = true);
+    
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
+    
+    _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
+      final devices = <String, ScanResult>{};
+      for (var result in results) {
+        devices[result.device.remoteId.str] = result;
+      }
+      setState(() {
+        _devices.addAll(devices);
+        _isScanning = false;
+      });
+    });
   }
 
   void _showPermissionDeniedDialog() {
@@ -132,22 +136,21 @@ class _FindFriendsPageState extends State<FindFriendsPage> {
             ),
           ),
           Expanded(
-            child: ListView(
-              children: [
-                _buildFriendTile("Alex Johnson", "Online"),
-                _buildFriendTile("Sarah Williams", "Last seen 2h ago"),
-                _buildFriendTile("Michael Chen", "Online"),
-                _buildFriendTile("Emily Rodriguez", "Last seen yesterday"),
-                _buildFriendTile("David Thompson", "Online"),
-                _buildFriendTile("Jessica Lee", "Last seen 5h ago"),
-              ],
-            ),
+            child: _isScanning
+                ? const Center(child: CircularProgressIndicator())
+                : _devices.isEmpty
+                    ? const Center(
+                        child: Text("No devices found",
+                            style: TextStyle(color: Colors.grey)))
+                    : ListView(
+                        children: _devices.values.map((result) => _buildFriendTile(result)).toList(),
+                      ),
           ),
           Padding(
             padding: const EdgeInsets.only(bottom: 24),
             child: FloatingActionButton(
               backgroundColor: const Color(0xFF80C67E),
-              onPressed: () {},
+              onPressed: _startDeviceScan,
               child: const Icon(Icons.group, color: Colors.white),
             ),
           )
@@ -156,7 +159,13 @@ class _FindFriendsPageState extends State<FindFriendsPage> {
     );
   }
 
-  Widget _buildFriendTile(String name, String status) {
+  Widget _buildFriendTile(ScanResult result) {
+    final deviceName = result.advertisementData.localName.isNotEmpty
+        ? result.advertisementData.localName
+        : result.device.platformName.isNotEmpty
+            ? result.device.platformName
+            : 'Unknown Device';
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Container(
@@ -170,16 +179,19 @@ class _FindFriendsPageState extends State<FindFriendsPage> {
             const CircleAvatar(
               backgroundColor: Color(0xFF6BA86F),
               radius: 24,
+              child: Icon(Icons.devices, color: Colors.white),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name,
+                  Text(deviceName,
                       style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text(status,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.black)),
+                  Text("Signal: ${result.rssi} dBm",
                       style: const TextStyle(
                           fontSize: 12, color: Colors.black54)),
                 ],
@@ -199,4 +211,3 @@ class _FindFriendsPageState extends State<FindFriendsPage> {
     );
   }
 }
-
